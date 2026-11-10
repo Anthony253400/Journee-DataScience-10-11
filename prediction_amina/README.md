@@ -1,5 +1,7 @@
 # Prédire la richesse des collemboles
 
+Pour le projet actuel sur l'abondance **A** par site, voir [le guide de régression Mallows et Akaike](ANALYSE_ABONDANCE.md).
+
 La richesse **S** est le nombre de taxons de collemboles observés dans un prélèvement. Le modèle apprend à estimer ce nombre à partir des caractéristiques du site, par exemple le pH, la teneur en argile, la ville et l'usage du sol.
 
 ## Lancer le projet dans VS Code
