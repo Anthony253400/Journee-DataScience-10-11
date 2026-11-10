@@ -1,0 +1,494 @@
+---
+title: "analyseDiversity — Diversité des collemboles en sols urbains"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, echo=TRUE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(vegan)
+library(tibble)
+library(ggplot2)
+library(tidyr)
+
+theme_set(theme_minimal())
+```
+
+**Que fait ce code ?** On charge les packages utiles :
+`dplyr` (manipulation des données), `vegan` (indices de diversité),
+`tibble`, `ggplot2` et `tidyr` (graphiques).
+
+# Contexte
+
+Les **collemboles** sont de petits insectes du sol (moins de 2 mm). Ils font partie de
+la mésofaune et sont de bons **bioindicateurs** de la qualité des sols, surtout en ville.
+
+Deux fichiers de données sont utilisés :
+
+* `collembola_data_year1_train.csv` : comptages de collemboles par échantillon.
+* `BISES_data_sites.csv` : caractéristiques du sol de chaque site
+  (pH, texture, métaux...) + la ville et l'usage du sol.
+
+Objectif : calculer des **indices de diversité** par site, puis vérifier s'ils
+s'expliquent par les caractéristiques du sol et le contexte urbain.
+
+# Importation et préparation des données
+
+```{r donnees, echo=TRUE}
+data1 <- read.csv2("data/collembola_data_year1_train.csv", header = TRUE)
+data_site <- read.csv2("data/BISES_data_sites.csv", header = TRUE)
+
+nb_vars_initial <- ncol(data1)
+
+cols_to_remove <- c(
+  "total_collembola", "Acari_Gamasides", "Acari_Oribates",
+  "Acari_others", "Acari_total", "Other_microarthropodes", 
+  "total_microarthropodes"
+)
+
+df_spe <- data1 %>%
+  select(-any_of(cols_to_remove)) %>%
+  mutate(ID_base = sub("_[0-9]+$", "", Echantillon)) %>%
+  select(-Echantillon) %>%
+  group_by(ID_base) %>%
+  summarise(across(where(is.numeric), \(x) sum(x, na.rm = TRUE)), .groups = "drop") %>%
+  column_to_rownames(var = "ID_base")
+
+nb_especes <- ncol(df_spe)
+
+A <- rowSums(df_spe)
+S <- specnumber(df_spe)
+H <- diversity(df_spe, index = "shannon")
+J <- H / log(S)
+
+indices_ecologiques <- data.frame(
+  ID_base = rownames(df_spe),
+  Abondance_A = A,
+  Richesse_S = S,
+  Shannon_H = H,
+  Pielou_J = J
+)
+
+donnees_completes <- indices_ecologiques %>%
+  left_join(data_site, by = c("ID_base" = "Site"))
+
+factors <- c("site_group", "land_use", "city")
+
+for (factor in factors) {
+  if (factor %in% colnames(donnees_completes)) {
+    donnees_completes[[factor]] <- as.factor(donnees_completes[[factor]])
+  }
+}
+
+donnees_completes <- na.omit(donnees_completes)
+
+cat("Sites après préparation :", nrow(donnees_completes), "\n")
+cat("Nombre de taxons :", nb_especes, "\n")
+```
+
+**Explication du code, étape par étape :**
+
+1. `read.csv2(...)` : lit les deux fichiers CSV (le séparateur est `;`, format français).
+2. `cols_to_remove` : liste des colonnes à enlever (acariens, totaux...). On ne garde
+   que les collemboles.
+3. `select(-any_of(...))` : supprime ces colonnes.
+4. `sub("_[0-9]+$", "", Echantillon)` : enlève le suffixe `_1`, `_2`... du nom des
+   échantillons. Exemple : `BISES_MO_FU_CDN_2` devient `BISES_MO_FU_CDN`.
+   Les prélèvements d'un même site ont ainsi le même nom `ID_base`.
+5. `group_by(ID_base) + summarise(sum(...))` : **somme les abondances par site**.
+   On passe de 418 prélèvements à 140 sites.
+6. `column_to_rownames` : le nom du site devient le nom de la ligne.
+7. `rowSums`, `specnumber`, `diversity` : calculent les 4 indices (voir section suivante).
+8. `left_join(data_site)` : ajoute au tableau des indices les colonnes du sol
+   correspondant à chaque site.
+9. `as.factor` : transforme `city`, `land_use` et `site_group` en variables
+   qualitatives.
+10. `na.omit` : enlève les sites avec des valeurs manquantes (137 sites restants).
+
+# Indices écologiques ($\alpha$-diversité)
+
+Pour chaque site, on calcule 4 indices. Ce sont nos **variables à expliquer ($Y$)** :
+
+### 1. Abondance totale ($A$)
+Nombre total d'individus récoltés dans l'échantillon :
+$$A = \sum_{i=1}^{S} n_i$$
+Mesure la **quantité** d'animaux, pas la diversité.
+
+### 2. Richesse spécifique ($S$)
+Nombre total d'espèces présentes :
+$$S = \text{Nombre d'espèces avec } n_i > 0$$
+`specnumber(df_spe)` compte les colonnes non nulles de chaque ligne.
+
+### 3. Indice de Shannon ($H$)
+$$H = -\sum_{i=1}^{S} p_i \ln(p_i) \quad \text{où } p_i = \frac{n_i}{A}$$
+$H$ est **grand** quand il y a beaucoup d'espèces bien réparties, **petit** quand
+une espèce domine.
+
+### 4. Équitabilité de Pielou ($J$)
+$$J = \frac{H}{\ln(S)}$$
+Même idée que Shannon, mais ramenée entre 0 et 1 :
+$J$ proche de 1 = espèces équitablement réparties, proche de 0 = une espèce domine.
+
+# Graphiques
+
+## Espèces les plus abondantes
+
+```{r top-especes}
+abondance_especes <- sort(colSums(df_spe), decreasing = TRUE)
+top_especes <- head(abondance_especes, 10)
+
+barplot(
+  top_especes,
+  horiz = TRUE,
+  las = 1,
+  col = "steelblue",
+  border = NA,
+  main = "Les 10 espèces les plus abondantes",
+  xlab = "Nombre total d'individus"
+)
+```
+
+**Explication du code :** `colSums(df_spe)` fait la somme de chaque espèce sur tous
+les sites, `sort(..., decreasing = TRUE)` les trie de la plus abondante à la plus rare,
+`head(..., 10)` garde les 10 premières, et `barplot` dessine le diagramme en barres.
+
+**Ce qu'on voit :** une seule espèce, *Proisotoma minuta*, domine très largement
+(environ 94 % des individus). Toutes les autres sont bien derrière. C'est pour ça que
+les indices de Shannon et de Pielou sont souvent faibles.
+
+## Distribution des 4 indices
+
+```{r histogrammes, fig.height=6}
+par(mfrow = c(2, 2))
+hist(donnees_completes$Abondance_A, main = "Abondance A", xlab = "A", col = "steelblue")
+hist(donnees_completes$Richesse_S, main = "Richesse S", xlab = "S", col = "steelblue")
+hist(donnees_completes$Shannon_H, main = "Shannon H", xlab = "H", col = "steelblue")
+hist(donnees_completes$Pielou_J, main = "Pielou J", xlab = "J", col = "steelblue")
+par(mfrow = c(1, 1))
+```
+
+**Explication du code :** `par(mfrow = c(2, 2))` affiche 4 graphiques sur une même
+figure (2 lignes, 2 colonnes). Chaque `hist(...)` trace l'histogramme d'un indice.
+
+**Ce qu'on voit :**
+
+* $A$ : de 36 à 1722 individus, avec la plupart des sites entre 200 et 1000.
+* $S$ : entre 2 et 16 espèces.
+* $H$ et $J$ : la majorité des valeurs sont proches de 0, donc des communautés
+  dominées par peu d'espèces.
+
+## Effet de l'usage du sol
+
+Le code d'usage (`land_use`) correspond à un groupe écologique :
+FU et JP = production alimentaire (*Food Production*), PU = loisirs (*Leisure*),
+LV et RP = trafic (*Traffic*).
+
+```{r boxplot-land-use, fig.height=8}
+par(mfrow = c(2, 2))
+boxplot(Abondance_A ~ land_use, data = donnees_completes,
+        main = "Abondance A selon l'usage du sol", xlab = "Usage du sol", ylab = "A",
+        col = "steelblue")
+boxplot(Richesse_S ~ land_use, data = donnees_completes,
+        main = "Richesse S selon l'usage du sol", xlab = "Usage du sol", ylab = "S",
+        col = "steelblue")
+boxplot(Shannon_H ~ land_use, data = donnees_completes,
+        main = "Shannon H selon l'usage du sol", xlab = "Usage du sol", ylab = "H",
+        col = "steelblue")
+boxplot(Pielou_J ~ land_use, data = donnees_completes,
+        main = "Pielou J selon l'usage du sol", xlab = "Usage du sol", ylab = "J",
+        col = "steelblue")
+par(mfrow = c(1, 1))
+```
+
+**Explication du code :** `boxplot(Y ~ land_use, ...)` trace un diagramme en boîte de
+l'indice `Y` pour chaque usage du sol. La formule `Y ~ land_use` se lit
+« Y en fonction de land_use ».
+
+**Ce qu'on voit :**
+
+* $A$ : les abondances sont assez proches d'un usage à l'autre.
+* $S$ : les jardins (JP) sont les plus riches en espèces.
+* $H$ et $J$ : plus élevés pour les usages de production (FU, JP). Les sites de
+  trafic (RP, LV) et de loisirs (PU) ont des communautés plus déséquilibrées.
+
+## Effet de la ville
+
+```{r boxplot-city, fig.height=8}
+par(mfrow = c(2, 2))
+boxplot(Abondance_A ~ city, data = donnees_completes,
+        main = "Abondance A selon la ville", xlab = "Ville", ylab = "A",
+        col = "coral")
+boxplot(Richesse_S ~ city, data = donnees_completes,
+        main = "Richesse S selon la ville", xlab = "Ville", ylab = "S",
+        col = "coral")
+boxplot(Shannon_H ~ city, data = donnees_completes,
+        main = "Shannon H selon la ville", xlab = "Ville", ylab = "H",
+        col = "coral")
+boxplot(Pielou_J ~ city, data = donnees_completes,
+        main = "Pielou J selon la ville", xlab = "Ville", ylab = "J",
+        col = "coral")
+par(mfrow = c(1, 1))
+```
+
+**Explication du code :** même principe, mais avec la variable `city`.
+
+**Ce qu'on voit :** la ville est très marquante. MO a peu d'individus mais des
+communautés équilibrées ($H$ et $J$ élevés). À l'inverse, NY et PA ont de très grandes
+abondances mais des $H$ et $J$ très bas : une espèce y explose. Les sites les plus
+abondants ne sont donc pas les plus diversifiés.
+
+# Modélisation linéaire
+
+## Stratégie
+
+On veut **expliquer** les indices de diversité avec les variables du sol et le contexte.
+Pour ça :
+
+1. Ajuster un modèle linéaire `lm()` pour **chacun des 4 indices** avec toutes les
+   variables explicatives.
+2. Comparer les **$R^2$ ajustés** : celui qui est le plus grand indique l'indice le
+   mieux expliqué. On utilise la version *ajustée* car elle pénalise le grand nombre de
+   variables.
+3. Garder le meilleur indice, puis **retirer une par une** les variables non
+   significatives ($p$-valeur $\geq 0{,}05$) pour simplifier le modèle.
+
+## Quel indice modéliser ?
+
+```{r fonction-meilleur-y}
+Y <- c("Abondance_A", "Richesse_S", "Shannon_H", "Pielou_J")
+
+trouver_meilleur_y <- function(vector_y, df_complet) {
+  best_model <- NULL
+  best_y <- NULL
+  best_r2_adj <- -Inf
+
+  for (y in vector_y) {
+    X <- df_complet %>%
+      select(-any_of(vector_y), -any_of("ID_base"))
+
+    df_modele <- cbind(y = df_complet[[y]], X)
+
+    model <- lm(y ~ ., data = df_modele)
+
+    r2_adj <- summary(model)$adj.r.squared
+
+    if (!is.na(r2_adj) && r2_adj > best_r2_adj) {
+      best_model <- model
+      best_y <- y
+      best_r2_adj <- r2_adj
+    }
+  }
+
+  return(list(
+    model = best_model,
+    best_y = best_y,
+    adj_r2 = best_r2_adj
+  ))
+}
+```
+
+**Explication du code :**
+
+* La fonction teste les 4 indices les uns après les autres (`for (y in vector_y)`).
+* `select(-any_of(vector_y), -any_of("ID_base"))` garde uniquement les variables
+  explicatives (on enlève les 4 indices et le nom du site).
+* `cbind(y = ..., X)` remet l'indice testé dans le tableau, sous le nom générique `y`.
+* `lm(y ~ ., data = df_modele)` ajuste le modèle : `y` expliqué par **toutes** les
+  autres colonnes (le point `.` veut dire « toutes les variables »).
+* `summary(model)$adj.r.squared` extrait le $R^2$ ajusté.
+* Si ce $R^2$ est le meilleur jusqu'ici, on garde ce modèle, cet indice et cette valeur.
+
+```{r resultat-meilleur-y}
+resultat <- trouver_meilleur_y(
+  vector_y = Y,
+  df_complet = donnees_completes
+)
+
+cat("Meilleure variable Y :", resultat$best_y, "\n")
+cat("R2 ajuste :", round(resultat$adj_r2, 4), "\n\n")
+
+summary(resultat$model)
+```
+
+**Ce qu'on voit :** le meilleur indice est l'**abondance $A$**, avec un $R^2$ ajusté
+d'environ **0,81** : le contexte et le sol expliquent bien l'abondance. À l'inverse,
+la richesse $S$ est quasiment inexpliquée ($R^2$ ajusté $\approx 0{,}06$).
+
+## Sélection des variables (élimination descendante)
+
+Le modèle complet contient trop de variables, dont beaucoup ne servent à rien.
+On retire donc, une par une, les variables **non significatives** :
+
+* à chaque tour, on regarde les $p$-valeurs du modèle courant ;
+* on enlève la variable la moins significative ($p$-valeur la plus grande, $\geq 0{,}05$) ;
+* on recommence jusqu'à ce que toutes les variables restantes soient significatives.
+
+Point de vigilance : une variable qualitative comme `land_use` produit **plusieurs**
+coefficients (un par modalité : `land_useJP`, `land_useLV`...). On regroupe donc les
+$p$-valeurs par variable d'origine pour décider si on garde ou retire `land_use` en
+entier.
+
+```{r fonction-filtrage}
+filtrer_variables_pvalue <- function(df_complet, y_nom = "Abondance_A", alpha = 0.05) {
+  indices_a_exclure <- c("Abondance_A", "Richesse_S", "Shannon_H", "Pielou_J",
+                         "ID_base", "Echantillon")
+  X <- df_complet %>%
+    select(-any_of(indices_a_exclure))
+
+  noms_colonnes <- colnames(X)
+
+  df_modele <- cbind(y = df_complet[[y_nom]], X)
+
+  modele <- lm(y ~ ., data = df_modele)
+
+  continuer <- TRUE
+
+  while (continuer) {
+    # 1) p-valeurs des coefficients du modèle courant
+    coef_table <- summary(modele)$coefficients
+    p_vals <- coef_table[, "Pr(>|t|)"]
+    p_vals <- p_vals[names(p_vals) != "(Intercept)"]
+
+    if (length(p_vals) == 0) {
+      message("Aucune variable restante dans le modèle.")
+      return(NULL)
+    }
+
+    # 2) Retrouver la variable d'origine de chaque coefficient
+    #    (land_useLV vient de la variable land_use, cityPA de city, ...)
+    vars_associees <- sapply(names(p_vals), function(v) {
+      match <- noms_colonnes[sapply(noms_colonnes, function(col) startsWith(v, col))]
+      if (length(match) > 0) {
+        match <- match[order(nchar(match), decreasing = TRUE)]
+        return(match[1])
+      } else {
+        return(v)
+      }
+    })
+
+    df_p <- data.frame(
+      var_origin = vars_associees,
+      p_val = p_vals,
+      stringsAsFactors = FALSE
+    )
+
+    # 3) p-valeur minimale de chaque variable (toutes modalités confondues)
+    min_p_per_var <- aggregate(p_val ~ var_origin, data = df_p, FUN = min)
+    vars_non_sig <- min_p_per_var[min_p_per_var$p_val >= alpha, ]
+
+    # 4) Si tout est significatif, on a fini
+    if (nrow(vars_non_sig) == 0) {
+      continuer <- FALSE
+    } else {
+      # Sinon on retire la variable la moins significative et on recommence
+      var_a_retirer <- vars_non_sig$var_origin[which.max(vars_non_sig$p_val)]
+      vars_actuelles <- unique(vars_associees)
+      vars_restantes <- setdiff(vars_actuelles, var_a_retirer)
+
+      if (length(vars_restantes) == 0) {
+        message("Toutes les variables ont été éliminées (p >= ", alpha, ").")
+        return(NULL)
+      }
+
+      df_modele <- cbind(y = df_complet[[y_nom]], X[, vars_restantes, drop = FALSE])
+      modele <- lm(y ~ ., data = df_modele)
+    }
+  }
+
+  return(modele)
+}
+```
+
+**Explication du code :**
+
+* `indices_a_exclure` : on enlève les 4 indices et les identifiants, il ne reste que
+  les variables explicatives dans `X`.
+* La boucle `while (continuer)` tourne tant qu'il reste des variables non significatives.
+* `summary(modele)$coefficients` récupère le tableau des coefficients, dont la colonne
+  `"Pr(>|t|)"` contient les $p$-valeurs. On enlève l'ordonnée à l'origine.
+* La partie 2) remonte du nom d'un coefficient (`cityPA`) au nom de la variable
+  (`city`) : on garde la colonne de `X` qui correspond au début du nom.
+* `aggregate(p_val ~ var_origin, FUN = min)` garde la plus petite $p$-valeur de chaque
+  variable : une variable qualitative est conservée dès qu'une de ses modalités est
+  significative.
+* `which.max` désigne la variable à retirer (la moins significative), `setdiff`
+  l'enlève de la liste, puis on relance `lm()` sur les variables restantes.
+
+```{r modele-final}
+modele_p005 <- filtrer_variables_pvalue(
+  df_complet = donnees_completes,
+  y_nom = resultat$best_y,
+  alpha = 0.05
+)
+
+if (!is.null(modele_p005)) {
+  cat("Variables retenues :", paste(names(coef(modele_p005))[-1], collapse = ", "), "\n")
+  cat("R2 ajusté du modèle final :", round(summary(modele_p005)$adj.r.squared, 4), "\n\n")
+  summary(modele_p005)
+}
+```
+
+**Ce qu'on voit :** le modèle final ne garde que **5 variables** : `city`, `land_use`,
+`K2O` (effet positif) et `MgO` (effet négatif). Il est plus simple que le modèle
+complet et son $R^2$ ajusté est légèrement meilleur (environ 0,82).
+
+## Lecture des résultats
+
+Les modalités se comparent à la **référence** (ville MO, usage FU) :
+
+* **Ville** : NS, NY et PA ont plus d'individus que MO, toutes choses égales par
+  ailleurs. C'est l'effet le plus fort du modèle.
+* **Usage du sol** : les usages loisirs (PU) et trafic (LV, RP) ont plus d'individus
+  que la production alimentaire (FU). JP n'est pas significativement différent de FU.
+* **Sol** : plus de potassium (`K2O`) = plus d'individus ; plus de magnésium (`MgO`)
+  = moins d'individus.
+
+## Vérification du modèle
+
+```{r diagnostics, fig.width = 8, fig.height = 7}
+par(mfrow = c(2, 2))
+plot(modele_p005)
+par(mfrow = c(1, 1))
+```
+
+**Explication du code :** `plot(modele)` affiche les 4 graphiques de diagnostic
+standards d'un modèle linéaire. On vérifie que les résidus n'ont pas de structure
+(1er graphique), qu'ils suivent la droite sur le Q-Q plot (2e), que leur dispersion
+est constante (3e) et qu'aucun site n'est trop influent (4e).
+
+## Observé vs prédit
+
+```{r observe-vs-predit}
+plot(
+  fitted(modele_p005), donnees_completes$Abondance_A,
+  xlab = "Valeurs prédites par le modèle",
+  ylab = "Valeurs observées",
+  main = "Observé vs prédit (abondance A)",
+  pch = 16, col = "steelblue"
+)
+abline(0, 1, col = "red", lty = 2)
+```
+
+**Explication du code :** `fitted(modele_p005)` donne les valeurs prédites par le
+modèle pour chaque site. On les compare aux valeurs observées. La droite rouge est la
+première bissectrice : si le modèle était parfait, tous les points seraient dessus.
+
+**Ce qu'on voit :** les points suivent bien la droite, le modèle prédit
+raisonnablement l'abondance de chaque site.
+
+# Conclusion
+
+* La communauté est **très déséquilibrée** : *Proisotoma minuta* domine (environ 94 %
+  des individus), d'où des Shannon et Pielou souvent faibles.
+* L'**abondance** $A$ est bien expliquée par le contexte ($R^2$ ajusté
+  $\approx 0{,}82$), surtout par la **ville** et l'**usage du sol**. La **richesse**
+  $S$ est quasiment inexpliquée par ces variables.
+* Les sites abondants (NY, PA, trafic) sont les **moins équilibrés**, et les sites
+  équilibrés (MO, production alimentaire) sont les moins abondants.
+
+**Limites** : ce sont des données observationnelles, on ne peut pas parler de
+causalité ; les variables du sol sont corrélées entre elles ; et la ville PA ne compte
+que 9 sites, ce qui rend son estimation fragile.
