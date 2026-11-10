@@ -1,0 +1,37 @@
+Diagnostic des données
+
+1. Présentation du jeu de données
+
+L'analyse porte sur le fichier `data_joint.csv`, qui regroupe les caractéristiques des sols et les données relatives aux populations de collemboles.
+
+Le jeu de données comprend 174 observations sites et 349 variables.
+
+Les variables sont majoritairement numériques. Elles comprennent notamment le pH, la matière organique, l'azote et les concentrations en différents éléments chimiques, ainsi que des données d'abondance des collemboles.
+
+2. Valeurs manquantes
+
+Le diagnostic initial a identifié 11 078 valeurs manquantes dans l'ensemble du jeu de données.
+
+Nous avons choisi de conserver les observations afin de ne pas perdre les informations disponibles sur les autres variables.
+
+Lors des analyses, les calculs seront réalisés à partir des valeurs disponibles pour les variables concernées.
+
+3. Doublons
+
+La recherche de lignes strictement identiques n'a révélé aucun doublon.
+
+Aucune suppression n'a donc été nécessaire.
+
+4. Statistiques descriptives
+
+Les statistiques descriptives permettent d'étudier la tendance centrale et la dispersion des variables numériques à partir de leur moyenne, médiane, écart-type, minimum et maximum.
+
+Elles constituent une première étape pour comprendre la structure du jeu de données et préparer les visualisations.
+
+5. Conclusion du diagnostic
+
+Le jeu de données présente des valeurs manquantes, mais aucune ligne strictement dupliquée n'a été détectée.
+
+Nous avons décidé de conserver les observations disponibles et de ne procéder à aucune suppression automatique.
+
+Le fichier original reste inchangé. L'analyse exploratoire se poursuivra par la visualisation des distributions et des relations entre les variables.

@@ -479,6 +479,102 @@ première bissectrice : si le modèle était parfait, tous les points seraient d
 **Ce qu'on voit :** les points suivent bien la droite, le modèle prédit
 raisonnablement l'abondance de chaque site.
 
+```
+library(dplyr)
+
+df_regression <- donnees_completes %>%
+  select(-ID_base, -Richesse_S, -Shannon_H, -Pielou_J)
+
+modele_complet <- lm(  Abondance_A~ ., data = df_regression)
+
+summary(modele_complet)
+```
+
+```
+library(dplyr)
+library(car)
+
+df_regression <- donnees_completes %>%
+  select(-any_of(c("ID_base", "Site", "Richesse_S", "Shannon_H", "Pielou_J", "site_group")))
+
+names(df_regression) <- make.names(names(df_regression))
+
+regression_vif_stepwise <- function(data, cible = "Abondance_A", k = 10, seuil_vif = 5) {
+  
+  vars_explicatives <- setdiff(names(data), cible)
+  
+  for (i in 1:k) {
+    # Ajustement du modèle courant
+    formule <- as.formula(paste(cible, "~", paste(vars_explicatives, collapse = " + ")))
+    modele  <- lm(formule, data = data)
+    
+    # Extraction de R² et R² ajusté
+    mod_summary <- summary(modele)
+    r2     <- mod_summary$r.squared
+    r2_adj <- mod_summary$adj.r.squared
+    
+    # Détection et retrait prioritaire des alias parfaits
+    al <- alias(modele)$Complete
+    if (!is.null(al)) {
+      aliased_vars <- rownames(al)
+      var_alias_origin <- sapply(aliased_vars, function(v) {
+        m <- vars_explicatives[sapply(vars_explicatives, function(x) startsWith(v, x))]
+        if (length(m) > 0) m[order(nchar(m), decreasing = TRUE)][1] else v
+      })
+      var_suppr <- var_alias_origin[1]
+      
+      cat(sprintf("Itération %02d | R² = %.4f | R²_adj = %.4f | [Alias parfait retiré] : %s\n",
+                  i, r2, r2_adj, var_suppr))
+      
+      vars_explicatives <- setdiff(vars_explicatives, var_suppr)
+      next
+    }
+    
+    # Calcul des VIF / GVIF
+    vif_res <- car::vif(modele)
+    
+    if (is.matrix(vif_res) && "GVIF^(1/(2*Df))" %in% colnames(vif_res)) {
+      vif_values <- vif_res[, "GVIF^(1/(2*Df))"]^2
+    } else if (is.matrix(vif_res)) {
+      vif_values <- vif_res[, 1]
+    } else {
+      vif_values <- vif_res
+    }
+    
+    max_vif <- max(vif_values, na.rm = TRUE)
+    var_to_remove <- names(which.max(vif_values))
+    
+    cat(sprintf("Itération %02d | R² = %.4f | R²_adj = %.4f | Max VIF : %-15s (VIF = %.2f)\n", 
+                i, r2, r2_adj, var_to_remove, max_vif))
+    
+    # Arrêt si le seuil est atteint
+    if (!is.null(seuil_vif) && max_vif <= seuil_vif) {
+      cat("--> Seuil critique de VIF atteint, fin de la sélection.\n")
+      break
+    }
+    
+    # Retrait de la variable au VIF le plus fort
+    vars_explicatives <- setdiff(vars_explicatives, var_to_remove)
+  }
+  
+  # Modèle final
+  formule_finale <- as.formula(paste(cible, "~", paste(vars_explicatives, collapse = " + ")))
+  modele_final   <- lm(formule_finale, data = data)
+  
+  return(list(
+    modele = modele_final,
+    variables_retenues = vars_explicatives,
+    vif_final = car::vif(modele_final)
+  ))
+}
+
+
+resultat_vif <- regression_vif_stepwise(df_regression, cible = "Abondance_A", k = 10, seuil_vif = NULL)
+
+summary(resultat_vif$modele)
+```
+
+
 # Conclusion
 
 * La communauté est **très déséquilibrée** : *Proisotoma minuta* domine (environ 94 %
