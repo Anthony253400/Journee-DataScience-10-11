@@ -2,9 +2,9 @@
 # font partie des principaux microarthropodes qui composent la mésofaune du sol 
 # (mesurant généralement entre 0,1 et 2 mm)
 
-setwd("~/Nextcloud2/Recherche/ALL/SHS/2025_CEFE_LouiseEydoux/2026_BISES_collembolla")
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-data1 <- read.csv2("BISES_collembola_data_year1_clean.csv", header= TRUE)
+data1 <- read.csv2("data/BISES_collembola_data_year1_clean.csv", header= TRUE)
 dim(data1)
 # [1] 522 106
 
