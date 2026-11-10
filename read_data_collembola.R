@@ -43,5 +43,5 @@ A <- rowSums(data1.spe)
 S <- specnumber(data1.spe)
 H <- diversity(data1.spe, index = "shannon") 
 J <- H/log(S)
-A
+
 
