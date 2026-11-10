@@ -12,6 +12,8 @@ str(data1)
 
 data_site <- read.csv2("data/BISES_data_sites.csv",  header= TRUE)
 dim(data_site)
+data_site <- head(data_site, -1)
+dim(data_site)
 str(data_site)
 
 ## ---------------------------------
@@ -43,5 +45,9 @@ A <- rowSums(data1.spe)
 S <- specnumber(data1.spe)
 H <- diversity(data1.spe, index = "shannon") 
 J <- H/log(S)
+A
+
+
+
 
 

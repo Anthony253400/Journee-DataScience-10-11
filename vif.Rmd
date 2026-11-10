@@ -1,0 +1,152 @@
+```{r}
+library(dplyr)
+library(vegan)
+library(tibble)
+library(ggplot2)
+library(tidyr)
+```
+
+#Jointure 
+
+```{r}
+data1 <- read.csv2("data/collembola_data_year1_train.csv", header = TRUE)
+data_site <- read.csv2("data/BISES_data_sites.csv", header = TRUE)
+
+nb_vars_initial <- ncol(data1)
+
+cols_to_remove <- c(
+  "total_collembola", "Acari_Gamasides", "Acari_Oribates",
+  "Acari_others", "Acari_total", "Other_microarthropodes", 
+  "total_microarthropodes"
+)
+
+df_spe <- data1 %>%
+  select(-any_of(cols_to_remove)) %>%
+  mutate(ID_base = sub("_[0-9]+$", "", Echantillon)) %>%
+  select(-Echantillon) %>%
+  group_by(ID_base) %>%
+  summarise(across(where(is.numeric), \(x) sum(x, na.rm = TRUE)), .groups = "drop") %>%
+  column_to_rownames(var = "ID_base")
+
+nb_especes <- ncol(df_spe)
+
+A <- rowSums(df_spe)
+S <- specnumber(df_spe)
+H <- diversity(df_spe, index = "shannon")
+J <- H / log(S)
+
+indices_ecologiques <- data.frame(
+  ID_base = rownames(df_spe),
+  Abondance_A = A,
+  Richesse_S = S,
+  Shannon_H = H,
+  Pielou_J = J
+)
+
+donnees_completes <- indices_ecologiques %>%
+  left_join(data_site, by = c("ID_base" = "Site"))
+
+factors <- c("site_group", "land_use", "city")
+
+for (factor in factors) {
+  if (factor %in% colnames(donnees_completes)) {
+    donnees_completes[[factor]] <- as.factor(donnees_completes[[factor]])
+  }
+}
+
+donnees_completes <- na.omit(donnees_completes)
+
+```
+
+#Regression Avec toutes les variables
+```{r}
+df_regression <- donnees_completes %>%
+  select(-ID_base, -Richesse_S, -Shannon_H, -Pielou_J)
+
+modele_complet <- lm(  Abondance_A~ ., data = df_regression)
+
+summary(modele_complet)
+```
+
+#Méthodes du vif
+
+```{r}
+df_regression <- donnees_completes %>%
+  select(-any_of(c("ID_base", "Site", "Richesse_S", "Shannon_H", "Pielou_J", "site_group")))
+
+names(df_regression) <- make.names(names(df_regression))
+
+regression_vif_stepwise <- function(data, cible = "Abondance_A", k = 10, seuil_vif = 5) {
+  
+  vars_explicatives <- setdiff(names(data), cible)
+  
+  for (i in 1:k) {
+    
+    formule <- as.formula(paste(cible, "~", paste(vars_explicatives, collapse = " + ")))
+    modele  <- lm(formule, data = data)
+    
+    # Extraction de R² et R² ajusté
+    mod_summary <- summary(modele)
+    r2     <- mod_summary$r.squared
+    r2_adj <- mod_summary$adj.r.squared
+    
+    # Détection et retrait prioritaire des alias parfaits
+    al <- alias(modele)$Complete
+    if (!is.null(al)) {
+      aliased_vars <- rownames(al)
+      var_alias_origin <- sapply(aliased_vars, function(v) {
+        m <- vars_explicatives[sapply(vars_explicatives, function(x) startsWith(v, x))]
+        if (length(m) > 0) m[order(nchar(m), decreasing = TRUE)][1] else v
+      })
+      var_suppr <- var_alias_origin[1]
+      
+      cat(sprintf("Itération %02d | R² = %.4f | R²_adj = %.4f | [Alias parfait retiré] : %s\n",
+                  i, r2, r2_adj, var_suppr))
+      
+      vars_explicatives <- setdiff(vars_explicatives, var_suppr)
+      next
+    }
+    
+    # Calcul des VIF
+    vif_res <- car::vif(modele)
+    
+    if (is.matrix(vif_res) && "GVIF^(1/(2*Df))" %in% colnames(vif_res)) {
+      vif_values <- vif_res[, "GVIF^(1/(2*Df))"]^2
+    } else if (is.matrix(vif_res)) {
+      vif_values <- vif_res[, 1]
+    } else {
+      vif_values <- vif_res
+    }
+    
+    max_vif <- max(vif_values, na.rm = TRUE)
+    var_to_remove <- names(which.max(vif_values))
+    
+    cat(sprintf("Itération %02d | R² = %.4f | R²_adj = %.4f | Max VIF : %-15s (VIF = %.2f)\n", 
+                i, r2, r2_adj, var_to_remove, max_vif))
+    
+    # condi d'arret
+    if (!is.null(seuil_vif) && max_vif <= seuil_vif) {
+      cat("--> Seuil critique de VIF atteint, fin de la sélection.\n")
+      break
+    }
+    
+    # Retrait vif
+    vars_explicatives <- setdiff(vars_explicatives, var_to_remove)
+  }
+  
+  # Modèle final
+  formule_finale <- as.formula(paste(cible, "~", paste(vars_explicatives, collapse = " + ")))
+  modele_final   <- lm(formule_finale, data = data)
+  
+  return(list(
+    modele = modele_final,
+    variables_retenues = vars_explicatives,
+    vif_final = car::vif(modele_final)
+  ))
+}
+
+
+resultat_vif <- regression_vif_stepwise(df_regression, cible = "Abondance_A", k = 25, seuil_vif = NULL)
+
+summary(resultat_vif$modele)
+```
