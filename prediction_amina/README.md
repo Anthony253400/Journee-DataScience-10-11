@@ -1,8 +1,51 @@
-# Prédire la richesse des collemboles
+# Prédire l’abondance des collemboles
+
+`predire_a.py` estime l’abondance **A** par site. Le script additionne les comptages des 98 taxons de collemboles sur les prélèvements d’un même site, puis joint les caractéristiques du sol, la ville et l’usage du sol. Sur les 140 sites échantillonnés, 137 ont trois prélèvements et des mesures complètes. Parmi ces sites, 109 servent à l’entraînement et 28 au test final.
+
+## Sélection de la régression linéaire
+
+Le script part du modèle complet et essaie de retirer un terme à chaque étape. Il refait l’ajustement à chaque essai et compare les modèles avec le Cp de Mallows et l’AIC d’Akaike. Sur l’ensemble d’entraînement, les deux critères retiennent K₂O, MgO, Cu et Pb.
+
+| Modèle | Coefficients, constante comprise | Cp | AIC |
+| --- | ---: | ---: | ---: |
+| Complet | 32 | 32,00 | 1 406,69 |
+| K₂O, MgO, Cu et Pb | 5 | 4,42 | 1 384,84 |
+
+Le modèle réduit présente deux sites très influents d’après la distance de Cook et produit dix abondances ajustées négatives sur l’entraînement.
+
+## Résultats de prédiction
+
+La sélection des variables est répétée dans chacun des cinq plis de validation croisée. Les méthodes sont classées selon leur erreur absolue moyenne (MAE), en nombre d’individus.
+
+| Méthode | MAE | RMSE | R² |
+| --- | ---: | ---: | ---: |
+| Médiane d’entraînement | **54,44** | **152,16** | **−0,08** |
+| Forêt aléatoire | 75,23 | 152,98 | −0,09 |
+| Régression Mallows | 100,66 | 190,79 | −0,69 |
+| Régression Akaike | 113,92 | 200,58 | −0,87 |
+| Régression complète | 127,00 | 199,68 | −0,86 |
+
+La médiane est retenue pour sa MAE la plus faible en validation croisée. Elle prédit 29 individus par site. Sur les 28 sites du test final, sa MAE vaut **36,61**, sa RMSE **56,44** et son R² **−0,12**.
+
+## Exécution
+
+Depuis la racine du dépôt, dans un terminal PowerShell de VS Code.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r prediction_amina\requirements.txt
+.\.venv\Scripts\python.exe prediction_amina\predire_a.py
+```
+
+Le script lit les deux CSV du dossier `data/` et produit les tableaux et graphiques dans `prediction_amina/resultats/abondance/`.
+
+---
+
+## Première étude sur la richesse des collemboles
 
 La richesse **S** est le nombre de taxons de collemboles observés dans un prélèvement. Le modèle apprend à estimer ce nombre à partir des caractéristiques du site, par exemple le pH, la teneur en argile, la ville et l'usage du sol.
 
-## Lancer le projet dans VS Code
+### Lancer le projet dans VS Code
 
 Ouvre le dossier `Journee-DataScience-10-11` dans VS Code. Dans **Terminal → Nouveau terminal**, lance ces commandes PowerShell depuis la racine du dépôt. Elles utilisent Python 3.10 ou plus récent et installent les bibliothèques dans un environnement propre au projet.
 
@@ -14,7 +57,7 @@ python -m venv .venv
 
 Pandas lit et transforme les tableaux, NumPy calcule les indices, scikit-learn entraîne et évalue les modèles, et Matplotlib produit le graphique. Les bibliothèques de ce projet sont listées dans `prediction_amina/requirements.txt`.
 
-## Du fichier joint aux indices
+### Du fichier joint aux indices
 
 `predire_s.py` lit `data/data_joint.csv`, la jointure déjà présente dans le dépôt. Chaque ligne de ce fichier décrit un site. Les suffixes `_data_1`, `_data_2` et `_data_3` séparent les répétitions. Le script transforme ces blocs de colonnes en lignes de prélèvements et garde le code `Site` pour les regrouper. Les colonnes `X_data_*` servent à repérer les prélèvements présents. Sur les 174 sites de la jointure, 140 ont au moins un prélèvement, pour un total de 418 prélèvements.
 
@@ -27,7 +70,7 @@ Le script vérifie l'unicité des identifiants, l'intégrité des comptages et l
 | **H**, Shannon | Somme des termes `-p × ln(p)` sur les taxons présents, avec `p = comptage / A`. Le script fixe H à 0 quand A vaut 0. |
 | **J**, Pielou | `H / ln(S)` quand S est supérieur à 1. La cellule reste vide pour S égal à 0 ou 1. |
 
-## Entraîner les modèles
+### Entraîner les modèles
 
 Le script réserve 20 % des **sites** pour le test, avec une graine fixe de 42. Tous les prélèvements d'un site vont dans le même groupe. Cela permet de mesurer l'erreur sur des sites que le modèle découvre au moment du test. Les comptages et les indices de diversité servent au calcul de la cible. Les entrées du modèle se limitent aux 27 mesures du sol et à trois catégories du site (`city`, `land_use`, `site_group`).
 
@@ -35,7 +78,7 @@ Le script réserve 20 % des **sites** pour le test, avec une graine fixe de 42. 
 
 La référence prédit toujours la richesse moyenne des prélèvements d'entraînement. La régression linéaire est le premier modèle. Ridge utilise aussi une relation linéaire et limite la taille des coefficients, ce qui peut aider quand des mesures se ressemblent. Random Forest combine des arbres et peut apprendre des relations non linéaires. Les trois modèles sont évalués sur le même test avec des réglages fixés à l'avance.
 
-## Lire les résultats
+### Lire les résultats
 
 Le script écrit quatre fichiers dans `prediction_amina/resultats/`, un dossier local ignoré par Git.
 
@@ -46,7 +89,7 @@ Le script écrit quatre fichiers dans `prediction_amina/resultats/`, un dossier 
 
 Les prélèvements d'un même site partagent les mêmes variables explicatives. Le modèle leur attribue donc la même prédiction même si leur richesse observée varie. Les régressions peuvent produire des nombres décimaux ou négatifs. Les scores utilisent les valeurs brutes. Une seule séparation donne une première estimation qui dépend des sites tirés au sort et des villes représentées dans le jeu de données.
 
-### Premier essai sur les données du dépôt
+#### Premier essai sur les données du dépôt
 
 L'entraînement utilise 334 prélèvements de 112 sites, et le test 84 prélèvements de 28 autres sites. Six prélèvements issus de deux sites ont toutes leurs mesures numériques manquantes. Le modèle les conserve et complète leurs mesures avec les médianes apprises à l'entraînement.
 
