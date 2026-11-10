@@ -81,7 +81,7 @@ regression_vif_stepwise <- function(data, cible = "Abondance_A", k = 10, seuil_v
   vars_explicatives <- setdiff(names(data), cible)
   
   for (i in 1:k) {
-    
+    # Ajustement du modèle courant
     formule <- as.formula(paste(cible, "~", paste(vars_explicatives, collapse = " + ")))
     modele  <- lm(formule, data = data)
     
@@ -106,8 +106,9 @@ regression_vif_stepwise <- function(data, cible = "Abondance_A", k = 10, seuil_v
       vars_explicatives <- setdiff(vars_explicatives, var_suppr)
       next
     }
-    
-    # Calcul des VIF
+    #Formule VIF du cours
+    vif <- sapply(1:k, function(j) 1 / (1 - summary(lm(x[, j] ~ x[, -j]))$r.squared))
+
     vif_res <- car::vif(modele)
     
     if (is.matrix(vif_res) && "GVIF^(1/(2*Df))" %in% colnames(vif_res)) {
